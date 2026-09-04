@@ -10,6 +10,22 @@ dependencies
 | summarize invocations=count() by session, agent
 | order by invocations desc
 
+### OTel custom agent trace probe
+
+let probeAgent = "OTel Trace Probe";
+dependencies
+| where timestamp > ago(24h)
+| extend dims = todynamic(customDimensions)
+| extend agentFromMode = tostring(dims["copilot_chat.mode_name"])
+| extend agentFromSpan = tostring(dims["agent.name"])
+| extend agent = coalesce(agentFromMode, agentFromSpan)
+| where agent == probeAgent
+| extend session = coalesce(tostring(dims["session.id"]), tostring(dims["gen_ai.conversation.id"]))
+| extend agentAttribute = case(isnotempty(agentFromMode), "copilot_chat.mode_name", isnotempty(agentFromSpan), "agent.name", "unknown")
+| project timestamp, agent, agentAttribute, session, traceId=operation_Id, spanId=id, spanName=name, duration, success, resultCode
+| order by timestamp desc
+| take 100
+
 ### countries
 dependencies
 | where timestamp > ago(24h)

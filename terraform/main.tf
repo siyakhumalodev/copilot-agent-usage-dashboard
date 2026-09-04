@@ -1,11 +1,19 @@
 terraform {
   required_providers {
+    azapi = {
+      source  = "Azure/azapi"
+      version = ">= 2.0"
+    }
     azurerm = {
       source  = "hashicorp/azurerm"
       version = ">= 4.2"
     }
   }
-  required_version = ">= 1.5"
+  required_version = ">= 1.7"
+}
+
+provider "azapi" {
+  subscription_id = var.subscription_id
 }
 
 provider "azurerm" {
@@ -21,6 +29,50 @@ data "azurerm_client_config" "current" {}
 resource "azurerm_resource_group" "rg" {
   name     = var.resource_group_name
   location = var.location
+}
+
+# ── Private Networking ───────────────────────────────────────────────────────
+
+resource "azurerm_virtual_network" "vnet" {
+  name                = "${var.prefix}-vnet"
+  address_space       = [var.vnet_address_space]
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+}
+
+resource "azurerm_subnet" "container_apps" {
+  name                 = "${var.prefix}-aca-snet"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = [var.container_apps_subnet_address_prefix]
+
+  delegation {
+    name = "Microsoft.App-environments"
+
+    service_delegation {
+      name    = "Microsoft.App/environments"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/action"]
+    }
+  }
+}
+
+resource "azurerm_subnet" "private_endpoints" {
+  name                 = "${var.prefix}-pe-snet"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = [var.private_endpoints_subnet_address_prefix]
+}
+
+resource "azurerm_private_dns_zone" "key_vault" {
+  name                = "privatelink.vaultcore.azure.net"
+  resource_group_name = azurerm_resource_group.rg.name
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "key_vault" {
+  name                 = "${var.prefix}-kv-dns-link"
+  private_dns_zone_id  = azurerm_private_dns_zone.key_vault.id
+  virtual_network_id   = azurerm_virtual_network.vnet.id
+  registration_enabled = false
 }
 
 # ── Log Analytics Workspace (required for workspace-based App Insights) ───────
@@ -46,30 +98,58 @@ resource "azurerm_application_insights" "ai" {
 # ── Key Vault (stores App Insights connection string) ────────────────────────
 
 resource "azurerm_key_vault" "kv" {
-  name                      = "${var.prefix}-kv"
-  location                  = azurerm_resource_group.rg.location
-  resource_group_name       = azurerm_resource_group.rg.name
-  tenant_id                 = data.azurerm_client_config.current.tenant_id
-  sku_name                  = "standard"
-  rbac_authorization_enabled = true
-  soft_delete_retention_days = 7
-  purge_protection_enabled  = false
+  name                          = "${var.prefix}-kv"
+  location                      = azurerm_resource_group.rg.location
+  resource_group_name           = azurerm_resource_group.rg.name
+  tenant_id                     = data.azurerm_client_config.current.tenant_id
+  sku_name                      = "standard"
+  rbac_authorization_enabled    = true
+  public_network_access_enabled = false
+  soft_delete_retention_days    = 7
+  purge_protection_enabled      = false
 }
 
-resource "azurerm_key_vault_secret" "ai_conn_str" {
-  name         = "AppInsightsConnectionString"
-  value        = azurerm_application_insights.ai.connection_string
-  key_vault_id = azurerm_key_vault.kv.id
+resource "azurerm_private_endpoint" "key_vault" {
+  name                = "${var.prefix}-kv-pe"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  subnet_id           = azurerm_subnet.private_endpoints.id
 
-  # Ensure the deploying principal can write the secret
-  depends_on = [azurerm_role_assignment.kv_admin_deployer]
+  private_service_connection {
+    name                           = "${var.prefix}-kv-connection"
+    private_connection_resource_id = azurerm_key_vault.kv.id
+    subresource_names              = ["vault"]
+    is_manual_connection           = false
+  }
+
+  private_dns_zone_group {
+    name                 = "default"
+    private_dns_zone_ids = [azurerm_private_dns_zone.key_vault.id]
+  }
 }
 
-# Allow the deploying user to manage secrets during provisioning
-resource "azurerm_role_assignment" "kv_admin_deployer" {
-  scope                = azurerm_key_vault.kv.id
-  role_definition_name = "Key Vault Secrets Officer"
-  principal_id         = data.azurerm_client_config.current.object_id
+# ARM provisions this secret without requiring public access to the vault data plane.
+resource "azapi_resource" "ai_conn_str" {
+  type      = "Microsoft.KeyVault/vaults/secrets@2024-11-01"
+  name      = "AppInsightsConnectionString"
+  parent_id = azurerm_key_vault.kv.id
+
+  body = {
+    properties = {
+      attributes = {
+        enabled = true
+      }
+      value = azurerm_application_insights.ai.connection_string
+    }
+  }
+}
+
+removed {
+  from = azurerm_key_vault_secret.ai_conn_str
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 # ── Container Registry ────────────────────────────────────────────────────────
@@ -93,6 +173,8 @@ resource "azurerm_container_app_environment" "env" {
   location                   = azurerm_resource_group.rg.location
   resource_group_name        = azurerm_resource_group.rg.name
   log_analytics_workspace_id = azurerm_log_analytics_workspace.law.id
+  logs_destination           = "log-analytics"
+  infrastructure_subnet_id   = azurerm_subnet.container_apps.id
 }
 
 # ── User-Assigned Identity for Container App bootstrap permissions ───────────
@@ -137,7 +219,7 @@ resource "azurerm_container_app" "collector" {
 
   secret {
     name                = "appinsights-conn-str"
-    key_vault_secret_id = azurerm_key_vault_secret.ai_conn_str.versionless_id
+    key_vault_secret_id = "${azurerm_key_vault.kv.vault_uri}secrets/AppInsightsConnectionString"
     identity            = azurerm_user_assigned_identity.collector.id
   }
 
@@ -154,6 +236,13 @@ resource "azurerm_container_app" "collector" {
 
     target_port = 4318
   }
+
+  depends_on = [
+    azapi_resource.ai_conn_str,
+    azurerm_private_endpoint.key_vault,
+    azurerm_private_dns_zone_virtual_network_link.key_vault,
+    azurerm_role_assignment.kv_secrets_user,
+  ]
 }
 
 # ── AcrPull role — Container App managed identity → ACR ──────────────────────
@@ -216,15 +305,10 @@ resource "terraform_data" "grafana_dashboard_import" {
   }
 
   provisioner "local-exec" {
-    interpreter = ["/bin/bash", "-c"]
-    command = <<-EOT
-      set -euo pipefail
-      az grafana dashboard import \
-        --resource-group "${azurerm_resource_group.rg.name}" \
-        --name "${azurerm_dashboard_grafana.grafana.name}" \
-        --definition "@${var.grafana_dashboard_definition_path}" \
-        --overwrite true \
-        --output none
+    interpreter = ["PowerShell", "-Command"]
+    command     = <<-EOT
+      az grafana dashboard import --resource-group "${azurerm_resource_group.rg.name}" --name "${azurerm_dashboard_grafana.grafana.name}" --definition "@${var.grafana_dashboard_definition_path}" --overwrite true --output none
+      if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     EOT
   }
 

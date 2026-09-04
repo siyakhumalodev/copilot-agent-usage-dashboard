@@ -19,7 +19,24 @@ variable "resource_group_name" {
 variable "subscription_id" {
   description = "Azure subscription ID used by the azurerm provider."
   type        = string
-  default     = "1885038d-f891-46b7-9c02-128ed13a7f06"
+}
+
+variable "vnet_address_space" {
+  description = "Address space for the private workload virtual network"
+  type        = string
+  default     = "10.20.0.0/16"
+}
+
+variable "container_apps_subnet_address_prefix" {
+  description = "Address prefix for the delegated Container Apps infrastructure subnet"
+  type        = string
+  default     = "10.20.0.0/23"
+}
+
+variable "private_endpoints_subnet_address_prefix" {
+  description = "Address prefix for private endpoints"
+  type        = string
+  default     = "10.20.2.0/24"
 }
 
 variable "image_repository" {

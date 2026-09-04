@@ -4,8 +4,13 @@ output "acr_login_server" {
 }
 
 output "container_app_fqdn" {
-  description = "Public FQDN of the OTel Collector Container App. Use this as the otlpEndpoint in VS Code settings."
+  description = "Public FQDN of the OTel Collector ingress; Azure dependencies remain private"
   value       = azurerm_container_app.collector.latest_revision_fqdn
+}
+
+output "key_vault_private_endpoint_ip" {
+  description = "Private IP address assigned to the Key Vault private endpoint"
+  value       = azurerm_private_endpoint.key_vault.private_service_connection[0].private_ip_address
 }
 
 output "app_insights_connection_string" {

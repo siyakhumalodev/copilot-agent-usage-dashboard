@@ -26,3 +26,6 @@ override.tf.json
 # CLI config files
 .terraformrc
 terraform.rc
+
+# Copilot tracking artifacts
+/.copilot-tracking/

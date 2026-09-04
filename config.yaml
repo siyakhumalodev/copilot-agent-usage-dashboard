@@ -15,8 +15,7 @@ processors:
         action: upsert
 
 exporters:
-  azuremonitor:
-    connection_string: "${APPLICATIONINSIGHTS_CONNECTION_STRING}"
+  azure_monitor:
   debug:
     verbosity: detailed
 
@@ -25,9 +24,9 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch, attributes]
-      exporters: [azuremonitor, debug]
+      exporters: [azure_monitor, debug]
 
     metrics:
       receivers: [otlp]
       processors: [batch, attributes]
-      exporters: [azuremonitor]
+      exporters: [azure_monitor]

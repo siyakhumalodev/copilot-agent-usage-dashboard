@@ -10,6 +10,30 @@ dependencies
 | summarize invocations=count() by session, agent
 | order by invocations desc
 
+### All custom agents
+
+dependencies
+| where timestamp > ago(24h)
+| extend dims = todynamic(customDimensions)
+| where tostring(dims["github.copilot.agent.type"]) =~ "custom"
+| extend agent = coalesce(tostring(dims["copilot_chat.mode_name"]), tostring(dims["agent.name"]), tostring(dims["gen_ai.agent.name"]))
+| extend session = coalesce(tostring(dims["session.id"]), tostring(dims["copilot_chat.session_id"]), tostring(dims["gen_ai.conversation.id"]))
+| where isnotempty(agent)
+| summarize invocations=count(), sessions=dcount(session), lastUsed=max(timestamp) by agent
+| order by invocations desc
+
+### Custom agent invocations by session
+
+dependencies
+| where timestamp > ago(24h)
+| extend dims = todynamic(customDimensions)
+| where tostring(dims["github.copilot.agent.type"]) =~ "custom"
+| extend agent = coalesce(tostring(dims["copilot_chat.mode_name"]), tostring(dims["agent.name"]), tostring(dims["gen_ai.agent.name"]))
+| extend session = coalesce(tostring(dims["session.id"]), tostring(dims["copilot_chat.session_id"]), tostring(dims["gen_ai.conversation.id"]))
+| where isnotempty(agent) and isnotempty(session)
+| summarize invocations=count(), firstUsed=min(timestamp), lastUsed=max(timestamp), totalDuration=sum(duration) by agent, session
+| order by lastUsed desc
+
 ### OTel custom agent trace probe
 
 let probeAgent = "OTel Trace Probe";

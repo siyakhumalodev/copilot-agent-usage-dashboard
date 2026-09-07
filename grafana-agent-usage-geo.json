@@ -740,7 +740,7 @@
       },
       "id": 22,
       "panels": [],
-      "title": "Agent Activity",
+      "title": "Custom Agent Activity",
       "type": "row"
     },
     {
@@ -748,7 +748,7 @@
         "type": "grafana-azure-monitor-datasource",
         "uid": "${am_ds}"
       },
-      "description": "Table summarizing key performance metrics for each agent including total operations, average response time, and success rate with color-coded success rate indicators.",
+      "description": "Custom agent usage summary showing invocation count, distinct sessions, and most recent use for each custom agent.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -839,19 +839,19 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "operations"
+              "options": "invocations"
             },
             "properties": [
               {
                 "id": "displayName",
-                "value": "Total Operations"
+                "value": "Invocations"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "agent_name"
+              "options": "agent"
             },
             "properties": [
               {
@@ -875,7 +875,7 @@
         "sortBy": [
           {
             "desc": true,
-            "displayName": "Total Operations"
+            "displayName": "Invocations"
           }
         ]
       },
@@ -885,7 +885,7 @@
           "azureLogAnalytics": {
             "dashboardTime": true,
             "mode": "raw",
-            "query": "let agentNames = dynamic([$agentName]);\ndependencies\n| extend dims = todynamic(customDimensions) \n| where name contains \"invoke_agent\"\n| extend agent_name = tostring(dims[\"copilot_chat.mode_name\"])\n| where isnotempty(agent_name)\n| summarize \n    operations = count(),\n    avg_duration = round(avg(duration) / 1000, 2),\n    success_rate = round(countif(success == \"True\") * 100.0 / count(), 2)\n    by agent_name\n| order by operations desc",
+            "query": "dependencies\n| extend dims = todynamic(customDimensions)\n| where tostring(dims[\"github.copilot.agent.type\"]) =~ \"custom\"\n| extend agent = coalesce(tostring(dims[\"copilot_chat.mode_name\"]), tostring(dims[\"agent.name\"]), tostring(dims[\"gen_ai.agent.name\"]))\n| extend session = coalesce(tostring(dims[\"session.id\"]), tostring(dims[\"copilot_chat.session_id\"]), tostring(dims[\"gen_ai.conversation.id\"]))\n| where isnotempty(agent)\n| summarize invocations=count(), sessions=dcount(session), lastUsed=max(timestamp) by agent\n| order by invocations desc",
             "resources": [
               "/subscriptions/$sub/resourceGroups/$rg/providers/microsoft.insights/components/$res"
             ],
@@ -900,7 +900,7 @@
           "refId": "A"
         }
       ],
-      "title": "Agent Performance Summary",
+      "title": "Custom Agent Usage",
       "type": "table"
     },
     {
@@ -908,7 +908,7 @@
         "type": "grafana-azure-monitor-datasource",
         "uid": "${am_ds}"
       },
-      "description": "State timeline visualization showing hourly agent activity levels over time, with color intensity representing operation count per hour for each agent to identify usage patterns.",
+      "description": "Hourly custom agent invocations, grouped by the custom agent name emitted in Copilot telemetry.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -977,7 +977,7 @@
           "azureLogAnalytics": {
             "dashboardTime": true,
             "mode": "raw",
-            "query": "let agentNames = dynamic([$agentName]);\ndependencies \n| where name contains \"invoke_agent\"\n| extend dims = todynamic(customDimensions)\n| extend agent_name = coalesce(tostring(dims[\"copilot_chat.mode_name\"]), tostring(dims[\"agent.name\"]))\n| where isnotempty(agent_name)\n| summarize operations_count = count() by bin(timestamp, 1h), agent_name\n| order by timestamp asc",
+            "query": "dependencies\n| extend dims = todynamic(customDimensions)\n| where tostring(dims[\"github.copilot.agent.type\"]) =~ \"custom\"\n| extend agent = coalesce(tostring(dims[\"copilot_chat.mode_name\"]), tostring(dims[\"agent.name\"]), tostring(dims[\"gen_ai.agent.name\"]))\n| where isnotempty(agent)\n| summarize invocations=count() by bin(timestamp, 1h), agent\n| order by timestamp asc",
             "resources": [
               "/subscriptions/$sub/resourceGroups/$rg/providers/microsoft.insights/components/$res"
             ],
@@ -992,12 +992,12 @@
           "refId": "A"
         }
       ],
-      "title": "Agent Utilization Heatmap",
+      "title": "Custom Agent Invocations Over Time",
       "transformations": [
         {
           "id": "renameByRegex",
           "options": {
-            "regex": "operations_count (.*)",
+            "regex": "invocations (.*)",
             "renamePattern": "$1"
           }
         }
@@ -1271,7 +1271,7 @@
           "uid": "${am_ds}"
         },
         "definition": "",
-        "description": "Name of the agent",
+        "description": "Name of the custom agent",
         "includeAll": true,
         "label": "Agent",
         "multi": true,
@@ -1280,7 +1280,7 @@
         "query": {
           "azureLogAnalytics": {
             "dashboardTime": true,
-            "query": "dependencies \r\n| where name contains \"invoke_agent\"\r\n| extend agent_name = tostring(customDimensions[\"gen_ai.agent.name\"])\r\n| where isnotempty(agent_name)\r\n| summarize operationCount=count() by agent_name\r\n| sort by operationCount desc\r\n| project agent_name",
+            "query": "dependencies\r\n| extend dims = todynamic(customDimensions)\r\n| where tostring(dims[\"github.copilot.agent.type\"]) =~ \"custom\"\r\n| extend agent = coalesce(tostring(dims[\"copilot_chat.mode_name\"]), tostring(dims[\"agent.name\"]), tostring(dims[\"gen_ai.agent.name\"]))\r\n| where isnotempty(agent)\r\n| summarize invocations=count() by agent\r\n| order by invocations desc\r\n| project agent",
             "resources": [
               "/subscriptions/$sub/resourceGroups/$rg/providers/microsoft.insights/components/$res"
             ],
@@ -1301,8 +1301,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Dashboard-05-08-2026-17-22",
-  "uid": "subscriptions~1885038d-f891-46b7-9c02-128ed13a7f06~resourceGroups~agent-monitoring-rg~providers~Microsoft.Dashboard~dashboards~Dashboard-05-08-2026-17-22",
+  "title": "GitHub Custom Agents Dashboard",
+  "uid": "github-custom-agents",
   "version": 4,
   "weekStart": ""
 }

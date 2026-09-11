@@ -19,7 +19,9 @@ Use these samples to exercise agent invocations and chat workflows in VS Code, t
 
 ## Architecture
 
-```
+See the [solution dataflow architecture](dataflow-diagram.md) for the detailed runtime telemetry, query, secret, and image flows.
+
+```text
 VS Code (GitHub Copilot)
         │  OTLP/HTTP (port 4318)
   ▼  public HTTPS ingress
